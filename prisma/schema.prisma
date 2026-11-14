@@ -1,0 +1,229 @@
+// Prisma schema for the Khmer Typing Game Platform.
+//
+// IMPORTANT — how this fits with Supabase:
+// Supabase Auth owns a separate `auth` schema (auth.users) that Prisma cannot see or migrate.
+// The source of truth for DDL (tables, RLS policies, the profile-creation trigger, extensions)
+// is supabase/migrations/*.sql, applied via the Supabase SQL editor or `supabase db push`.
+// This file mirrors that SQL 1:1 so Prisma Client gets full typed query access to the `public`
+// schema. Run `prisma generate` after applying the SQL migrations; do not run `prisma migrate dev`
+// against a Supabase database (it would try to manage auth.users, which it doesn't own).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+enum Role {
+  student
+  teacher
+  admin
+
+  @@map("role")
+}
+
+enum Difficulty {
+  easy
+  medium
+  hard
+
+  @@map("difficulty")
+}
+
+enum LetterCategory {
+  consonant
+  independent_vowel
+  dependent_vowel
+  number
+  symbol
+
+  @@map("letter_category")
+}
+
+enum WordCategory {
+  animals
+  food
+  school
+  technology
+  daily_life
+  family
+  colors
+  nature
+
+  @@map("word_category")
+}
+
+enum AchievementRarity {
+  common
+  rare
+  epic
+  legendary
+
+  @@map("achievement_rarity")
+}
+
+/// Mirrors auth.users 1:1 (id is shared). Created automatically by the
+/// handle_new_user() trigger defined in supabase/migrations.
+model Profile {
+  id            String    @id @db.Uuid
+  username      String    @unique
+  fullName      String?   @map("full_name")
+  avatarUrl     String?   @map("avatar_url")
+  role          Role      @default(student)
+  xp            Int       @default(0)
+  coins         Int       @default(0)
+  level         Int       @default(1)
+  currentStreak Int       @default(0) @map("current_streak")
+  longestStreak Int       @default(0) @map("longest_streak")
+  lastPlayedAt  DateTime? @map("last_played_at") @db.Timestamptz(6)
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  gameSessions     GameSession[]
+  userAchievements UserAchievement[]
+  dailyProgress    DailyProgress[]
+  teachingClasses  Class[]           @relation("TeacherClasses")
+  classMemberships ClassStudent[]
+
+  @@map("profiles")
+}
+
+model Class {
+  id        String   @id @default(uuid()) @db.Uuid
+  teacherId String   @map("teacher_id") @db.Uuid
+  name      String
+  joinCode  String   @unique @map("join_code")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  teacher  Profile        @relation("TeacherClasses", fields: [teacherId], references: [id], onDelete: Cascade)
+  students ClassStudent[]
+
+  @@map("classes")
+}
+
+model ClassStudent {
+  classId   String   @map("class_id") @db.Uuid
+  studentId String   @map("student_id") @db.Uuid
+  joinedAt  DateTime @default(now()) @map("joined_at") @db.Timestamptz(6)
+
+  class   Class   @relation(fields: [classId], references: [id], onDelete: Cascade)
+  student Profile @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@id([classId, studentId])
+  @@map("class_students")
+}
+
+model Game {
+  id          String  @id @default(uuid()) @db.Uuid
+  slug        String  @unique
+  name        String
+  description String
+  icon        String
+  isActive    Boolean @default(true) @map("is_active")
+  sortOrder   Int     @default(0) @map("sort_order")
+
+  gameSessions GameSession[]
+
+  @@map("games")
+}
+
+model Letter {
+  id           String         @id @default(uuid()) @db.Uuid
+  char         String
+  romanization String
+  category     LetterCategory
+  difficulty   Difficulty     @default(easy)
+  sortOrder    Int            @default(0) @map("sort_order")
+
+  @@unique([char, category])
+  @@map("letters")
+}
+
+model Word {
+  id             String       @id @default(uuid()) @db.Uuid
+  word           String
+  romanization   String
+  englishMeaning String       @map("english_meaning")
+  category       WordCategory
+  difficulty     Difficulty   @default(easy)
+
+  @@unique([word, category])
+  @@map("words")
+}
+
+model GameSession {
+  id              String     @id @default(uuid()) @db.Uuid
+  userId          String     @map("user_id") @db.Uuid
+  gameId          String     @map("game_id") @db.Uuid
+  difficulty      Difficulty @default(easy)
+  score           Int        @default(0)
+  kpm             Decimal    @default(0) @db.Decimal(6, 2)
+  accuracy        Decimal    @default(0) @db.Decimal(5, 2)
+  correctCount    Int        @default(0) @map("correct_count")
+  wrongCount      Int        @default(0) @map("wrong_count")
+  maxCombo        Int        @default(0) @map("max_combo")
+  durationSeconds Int        @default(0) @map("duration_seconds")
+  xpEarned        Int        @default(0) @map("xp_earned")
+  coinsEarned     Int        @default(0) @map("coins_earned")
+  playedAt        DateTime   @default(now()) @map("played_at") @db.Timestamptz(6)
+
+  user Profile @relation(fields: [userId], references: [id], onDelete: Cascade)
+  game Game    @relation(fields: [gameId], references: [id], onDelete: Cascade)
+
+  @@index([gameId, score])
+  @@index([userId, playedAt])
+  @@map("game_sessions")
+}
+
+/// Static catalog of all 100 unlockable achievements, seeded from src/data/achievements.ts.
+model Achievement {
+  code          String            @id
+  name          String
+  description   String
+  icon          String
+  rarity        AchievementRarity @default(common)
+  criteriaType  String            @map("criteria_type")
+  criteriaValue Int               @map("criteria_value")
+  meta          String?
+  xpReward      Int               @default(0) @map("xp_reward")
+  coinReward    Int               @default(0) @map("coin_reward")
+
+  unlockedBy UserAchievement[]
+
+  @@map("achievements")
+}
+
+model UserAchievement {
+  userId          String   @map("user_id") @db.Uuid
+  achievementCode String   @map("achievement_code")
+  unlockedAt      DateTime @default(now()) @map("unlocked_at") @db.Timestamptz(6)
+
+  user        Profile     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  achievement Achievement @relation(fields: [achievementCode], references: [code], onDelete: Cascade)
+
+  @@id([userId, achievementCode])
+  @@map("user_achievements")
+}
+
+/// One row per user per calendar day. Weekly/monthly progress are derived views over this
+/// table (see supabase/migrations) rather than separately maintained tables, to avoid
+/// duplicated, driftable aggregates.
+model DailyProgress {
+  id             String   @id @default(uuid()) @db.Uuid
+  userId         String   @map("user_id") @db.Uuid
+  date           DateTime @db.Date
+  xpEarned       Int      @default(0) @map("xp_earned")
+  gamesPlayed    Int      @default(0) @map("games_played")
+  minutesPlayed  Int      @default(0) @map("minutes_played")
+  correctLetters Int      @default(0) @map("correct_letters")
+  wrongLetters   Int      @default(0) @map("wrong_letters")
+
+  user Profile @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, date])
+  @@map("daily_progress")
+}

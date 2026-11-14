@@ -1,0 +1,7 @@
+# Never upload local env files to Vercel's deployment source — real config comes from the
+# project's Environment Variables settings (or `vercel env add`), not from these files.
+# Without this, `vercel deploy` was uploading .env directly and Next.js's build was reading
+# secrets straight out of it, bypassing Vercel's env var system entirely.
+.env
+.env.local
+.env.*.local
